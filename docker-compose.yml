@@ -1,0 +1,39 @@
+services:
+  mariadb:
+    image: mariadb:11.4
+    container_name: chat-mariadb
+    environment:
+      MARIADB_DATABASE: chat
+      MARIADB_USER: chat
+      MARIADB_PASSWORD: chat
+      MARIADB_ROOT_PASSWORD: root
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 로컬 개발(./gradlew bootRun)에서는 DB만 띄운다: docker compose up -d mariadb
+  app:
+    build: .
+    container_name: chat-app
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      # Snapshot 간격 20: 메시지 몇십 개만으로 Snapshot 생성을 확인할 수 있다
+      SPRING_PROFILES_ACTIVE: demo
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:3306/chat
+    ports:
+      - "8080:8080"
+
+volumes:
+  mariadb-data:

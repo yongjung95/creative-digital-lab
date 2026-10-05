@@ -1,0 +1,27 @@
+%% docs/design.md 1장 전체 구조 그림의 원본.
+%% 고친 뒤 https://mermaid.live 등에서 PNG로 내보내 architecture.png를 교체한다.
+flowchart LR
+    Client[클라이언트]
+    DB[(MariaDB)]
+
+    subgraph App[애플리케이션]
+        Entry["REST Controller<br/>WebSocket Handler"]
+        Service["SessionService<br/>Lock · 검증 · 이벤트 저장"]
+        Broadcaster["실시간 push<br/>(커밋한 요청 스레드)"]
+        subgraph Async[커밋 후 비동기 · 전용 스레드 풀]
+            Snapshot[Snapshot 생성]
+            Projection[메시지 목록 반영]
+        end
+        Scheduler[안전망 스케줄러]
+    end
+
+    Client <--> Entry
+    Entry --> Service
+    Service --> DB
+    Service -. 커밋 후 .-> Broadcaster
+    Service -.-> Async
+    Broadcaster -. push .-> Client
+    Snapshot --> DB
+    Projection --> DB
+    Scheduler -. 누락분 채우기 .-> Snapshot
+    Scheduler -. 누락분 채우기 .-> Projection

@@ -1,0 +1,2464 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "실시간 1:1 채팅 + 이벤트 기반 상태 복원 API",
+    "description": "세션 생성/참여, 이벤트 수집과 조회, 특정 시점 상태 복원 API.\n실시간 송수신은 WebSocket(`/ws/sessions/{sessionId}`)으로 하며 프로토콜은 `docs/websocket.md`에 있다.\n\n**멱등성**: 상태를 바꾸는 요청은 클라이언트가 만든 `eventId`(소문자 UUID)를 받는다.\n처음 저장하면 201, 같은 eventId와 같은 내용으로 다시 보내면 200과 처음 결과,\n내용이 다르면 409 `EVENT_ID_CONFLICT`.\n\n**에러 형식**: RFC 7807 ProblemDetail(`application/problem+json`)에 확장 속성 `code`를 더한다.\n클라이언트는 `code`로 분기한다.\n",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Generated server url"
+    }
+  ],
+  "tags": [
+    {
+      "name": "세션",
+      "description": "세션 생성/참여/종료, 이벤트 수집과 조회"
+    },
+    {
+      "name": "복원",
+      "description": "특정 시점 상태 복원 (Snapshot + Replay)"
+    },
+    {
+      "name": "메시지",
+      "description": "현재 메시지 목록 (수정/삭제 반영)"
+    }
+  ],
+  "paths": {
+    "/sessions": {
+      "get": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "세션 목록",
+        "description": "최신 세션부터. 다음 페이지는 응답의 nextCursor를 cursor로 보낸다.",
+        "operationId": "searchSessions",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "세션 상태",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "세션 상태",
+              "enum": [
+                "IN_PROGRESS",
+                "SUSPENDED",
+                "COMPLETED"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "세션 생성 시각 이상 (시간대 포함 ISO-8601)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "세션 생성 시각 이상 (시간대 포함 ISO-8601)",
+              "example": "2026-10-04T00:00:00+09:00"
+            },
+            "example": "2026-10-04T00:00:00+09:00"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "세션 생성 시각 미만 (시간대 포함 ISO-8601)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "세션 생성 시각 미만 (시간대 포함 ISO-8601)",
+              "example": "2026-10-05T00:00:00+09:00"
+            },
+            "example": "2026-10-05T00:00:00+09:00"
+          },
+          {
+            "name": "participantName",
+            "in": "query",
+            "description": "참여자 이름 (정확히 일치)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "참여자 이름 (정확히 일치)",
+              "example": "철수"
+            },
+            "example": "철수"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "직전 응답의 nextCursor",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "직전 응답의 nextCursor"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "페이지 크기 (기본 20, 최대 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "description": "페이지 크기 (기본 20, 최대 100)",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "세션 생성",
+        "description": "같은 eventId로 다시 보내면 처음 만든 세션을 돌려준다.",
+        "operationId": "createSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "생성",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "같은 eventId 재시도 (처음 결과)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EVENT_ID_CONFLICT",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "EVENT_ID_CONFLICT": {
+                    "summary": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                      "code": "EVENT_ID_CONFLICT"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/snapshots": {
+      "post": {
+        "tags": [
+          "복원"
+        ],
+        "summary": "Snapshot 수동 생성",
+        "description": "현재 마지막 sequence 기준으로 만든다. Snapshot은 일정 간격마다 자동으로 만들어지며, 이 API는 확인/디버깅용이다.",
+        "operationId": "createSnapshot",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "생성",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "같은 sequence의 Snapshot이 이미 있음",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/join": {
+      "post": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "세션 참여",
+        "description": "참여자 번호(participantId)를 발급한다. 이 번호로 WebSocket에 연결한다. 정원은 2명이며 연결이 끊긴 참여자도 자리를 차지한다.",
+        "operationId": "join",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "참여",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinSessionResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "같은 eventId 재시도 (처음 결과)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SESSION_FULL, SESSION_COMPLETED, EVENT_ID_CONFLICT",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_FULL": {
+                    "summary": "세션 정원(2명)이 가득 찼습니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "세션 정원(2명)이 가득 찼습니다.",
+                      "code": "SESSION_FULL"
+                    }
+                  },
+                  "SESSION_COMPLETED": {
+                    "summary": "이미 종료된 세션입니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "이미 종료된 세션입니다.",
+                      "code": "SESSION_COMPLETED"
+                    }
+                  },
+                  "EVENT_ID_CONFLICT": {
+                    "summary": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                      "code": "EVENT_ID_CONFLICT"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY, SESSION_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  },
+                  "SESSION_BUSY": {
+                    "summary": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SESSION_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/events": {
+      "get": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "이벤트 범위 조회",
+        "description": "fromSequence 초과 ~ toSequence 이하를 sequence 순서로 돌려준다. 재연결 때 빠진 구간을 채우거나 디버깅할 때 쓴다. 시각 기준 조회는 timeline API가 담당한다.",
+        "operationId": "getEvents",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "fromSequence",
+            "in": "query",
+            "description": "이 번호 초과부터 (기본 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "이 번호 초과부터 (기본 0)",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "toSequence",
+            "in": "query",
+            "description": "이 번호 이하까지 (기본 끝까지)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "이 번호 이하까지 (기본 끝까지)",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "최대 개수 (기본 100, 최대 500)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "description": "최대 개수 (기본 100, 최대 500)",
+              "maximum": 500,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "이벤트 수집 (메시지 전송/수정/삭제, 나가기)",
+        "description": "type은 MESSAGE, MESSAGE_EDITED, MESSAGE_DELETED, LEAVE. DISCONNECT/RECONNECT는 서버가 WebSocket 연결 상태를 보고 만들기 때문에 보낼 수 없다(400). WebSocket의 SEND_EVENT로 보내도 같은 처리를 거친다.",
+        "operationId": "appendEvent",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "저장",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "같은 eventId 재시도 (처음 결과)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "NOT_MESSAGE_OWNER",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "NOT_MESSAGE_OWNER": {
+                    "summary": "본인이 보낸 메시지만 수정/삭제할 수 있습니다.",
+                    "value": {
+                      "title": "Forbidden",
+                      "status": 403,
+                      "detail": "본인이 보낸 메시지만 수정/삭제할 수 있습니다.",
+                      "code": "NOT_MESSAGE_OWNER"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND, PARTICIPANT_NOT_FOUND, MESSAGE_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  },
+                  "PARTICIPANT_NOT_FOUND": {
+                    "summary": "세션 참여자를 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션 참여자를 찾을 수 없습니다.",
+                      "code": "PARTICIPANT_NOT_FOUND"
+                    }
+                  },
+                  "MESSAGE_NOT_FOUND": {
+                    "summary": "메시지를 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "메시지를 찾을 수 없습니다.",
+                      "code": "MESSAGE_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SESSION_COMPLETED, PARTICIPANT_NOT_ACTIVE, MESSAGE_ALREADY_DELETED, EVENT_ID_CONFLICT",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_COMPLETED": {
+                    "summary": "이미 종료된 세션입니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "이미 종료된 세션입니다.",
+                      "code": "SESSION_COMPLETED"
+                    }
+                  },
+                  "PARTICIPANT_NOT_ACTIVE": {
+                    "summary": "요청을 처리할 수 없는 참여자 상태입니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "요청을 처리할 수 없는 참여자 상태입니다.",
+                      "code": "PARTICIPANT_NOT_ACTIVE"
+                    }
+                  },
+                  "MESSAGE_ALREADY_DELETED": {
+                    "summary": "이미 삭제된 메시지입니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "이미 삭제된 메시지입니다.",
+                      "code": "MESSAGE_ALREADY_DELETED"
+                    }
+                  },
+                  "EVENT_ID_CONFLICT": {
+                    "summary": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                      "code": "EVENT_ID_CONFLICT"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY, SESSION_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  },
+                  "SESSION_BUSY": {
+                    "summary": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SESSION_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/end": {
+      "post": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "세션 종료",
+        "description": "남은 참여자는 모두 나간 것으로 처리한다. 되돌릴 수 없고, 이후 상태를 바꾸는 요청은 409.",
+        "operationId": "endSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "종료 (같은 eventId 재시도도 처음 결과로 200)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SESSION_COMPLETED, EVENT_ID_CONFLICT",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_COMPLETED": {
+                    "summary": "이미 종료된 세션입니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "이미 종료된 세션입니다.",
+                      "code": "SESSION_COMPLETED"
+                    }
+                  },
+                  "EVENT_ID_CONFLICT": {
+                    "summary": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                    "value": {
+                      "title": "Conflict",
+                      "status": 409,
+                      "detail": "같은 eventId로 다른 내용의 요청이 이미 처리되었습니다.",
+                      "code": "EVENT_ID_CONFLICT"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY, SESSION_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  },
+                  "SESSION_BUSY": {
+                    "summary": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SESSION_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}": {
+      "get": {
+        "tags": [
+          "세션"
+        ],
+        "summary": "현재 세션 상태와 참여자",
+        "description": "세션/참여자 상태는 이벤트 저장과 같은 트랜잭션에서 갱신되므로 항상 최신이다.",
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/timeline": {
+      "get": {
+        "tags": [
+          "복원"
+        ],
+        "summary": "특정 시점 상태 복원",
+        "description": "at(시각)과 sequence 중 하나만 보낸다. at은 그 시각까지 서버가 저장한 마지막 이벤트를 기준으로 하며, 미래 시각이면 현재 상태를 돌려준다. restoredFrom으로 어떤 Snapshot에서 몇 개를 Replay했는지 알 수 있다.",
+        "operationId": "getTimeline",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "description": "이 시각 기준 (시간대 포함 ISO-8601). sequence와 함께 쓸 수 없다",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "이 시각 기준 (시간대 포함 ISO-8601). sequence와 함께 쓸 수 없다",
+              "example": "2026-10-04T21:00:00+09:00"
+            },
+            "example": "2026-10-04T21:00:00+09:00"
+          },
+          {
+            "name": "sequence",
+            "in": "query",
+            "description": "이 sequence 기준. at과 함께 쓸 수 없다",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "이 sequence 기준. at과 함께 쓸 수 없다",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/messages": {
+      "get": {
+        "tags": [
+          "메시지"
+        ],
+        "summary": "현재 메시지 목록",
+        "description": "최신순. 비동기로 반영되므로 방금 저장된 이벤트가 잠깐 늦게 보일 수 있고, projectedSequence가 반영된 위치다. 이전 페이지는 마지막 메시지의 sequence를 beforeSequence로 보낸다.",
+        "operationId": "getMessages",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "beforeSequence",
+            "in": "query",
+            "description": "이 번호 미만 (없으면 가장 최근부터)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "description": "이 번호 미만 (없으면 가장 최근부터)",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "개수 (기본 50, 최대 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "description": "개수 (기본 50, 최대 100)",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "INVALID_REQUEST": {
+                    "summary": "잘못된 요청입니다.",
+                    "value": {
+                      "title": "Bad Request",
+                      "status": 400,
+                      "detail": "잘못된 요청입니다.",
+                      "code": "INVALID_REQUEST"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SESSION_NOT_FOUND": {
+                    "summary": "세션을 찾을 수 없습니다.",
+                    "value": {
+                      "title": "Not Found",
+                      "status": 404,
+                      "detail": "세션을 찾을 수 없습니다.",
+                      "code": "SESSION_NOT_FOUND"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVER_BUSY",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "format": "int32"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "에러 코드. 클라이언트는 이 값으로 분기한다"
+                    }
+                  }
+                },
+                "examples": {
+                  "SERVER_BUSY": {
+                    "summary": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                    "value": {
+                      "title": "Service Unavailable",
+                      "status": 503,
+                      "detail": "서버가 요청을 처리할 여유가 없습니다. 잠시 후 다시 시도해주세요.",
+                      "code": "SERVER_BUSY"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "클라이언트가 만든 요청 ID (소문자 UUID). 재시도할 때도 같은 값을 보낸다",
+            "example": "3f6c2a8e-5b1d-4c7a-9e2f-8d4b6a1c0e57",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "eventId"
+        ]
+      },
+      "CreateSessionResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "COMPLETED"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SnapshotResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "JoinSessionRequest": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "클라이언트가 만든 요청 ID (소문자 UUID). 재시도할 때도 같은 값을 보낸다",
+            "example": "3f6c2a8e-5b1d-4c7a-9e2f-8d4b6a1c0e57",
+            "minLength": 1
+          },
+          "displayName": {
+            "type": "string",
+            "description": "표시 이름 (최대 50자)",
+            "example": "철수",
+            "maxLength": 50,
+            "minLength": 0
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "클라이언트 시각 (선택). 보존만 하고 순서 기준으로는 쓰지 않는다",
+            "example": "2026-10-04T21:00:00+09:00"
+          }
+        },
+        "required": [
+          "displayName",
+          "eventId"
+        ]
+      },
+      "JoinSessionResponse": {
+        "type": "object",
+        "properties": {
+          "participantId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "DISCONNECTED",
+              "LEFT"
+            ]
+          }
+        }
+      },
+      "ClientEventRequest": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "클라이언트가 만든 요청 ID (소문자 UUID). 재시도할 때도 같은 값을 보낸다",
+            "example": "3f6c2a8e-5b1d-4c7a-9e2f-8d4b6a1c0e57",
+            "minLength": 1
+          },
+          "participantId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "보내는 참여자 (JOIN에서 발급)",
+            "example": 1
+          },
+          "type": {
+            "type": "string",
+            "description": "이벤트 종류. DISCONNECT/RECONNECT는 서버만 만든다",
+            "enum": [
+              "MESSAGE",
+              "MESSAGE_EDITED",
+              "MESSAGE_DELETED",
+              "LEAVE"
+            ]
+          },
+          "targetEventId": {
+            "type": "string",
+            "description": "수정/삭제할 메시지 ID (MESSAGE 이벤트의 eventId). 수정/삭제에만 필요"
+          },
+          "payload": {
+            "type": "object",
+            "description": "MESSAGE/MESSAGE_EDITED는 {\"content\": \"...\"} (최대 2000자), MESSAGE_DELETED/LEAVE는 {}",
+            "example": {
+              "content": "안녕"
+            }
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "클라이언트 시각 (선택). 보존만 하고 순서 기준으로는 쓰지 않는다",
+            "example": "2026-10-04T21:00:00+09:00"
+          }
+        },
+        "required": [
+          "eventId",
+          "participantId",
+          "type"
+        ]
+      },
+      "EventResponse": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "SESSION_CREATED",
+              "JOIN",
+              "MESSAGE",
+              "MESSAGE_EDITED",
+              "MESSAGE_DELETED",
+              "LEAVE",
+              "DISCONNECT",
+              "RECONNECT",
+              "SESSION_ENDED"
+            ]
+          },
+          "participantId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "targetEventId": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EndSessionRequest": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "description": "클라이언트가 만든 요청 ID (소문자 UUID). 재시도할 때도 같은 값을 보낸다",
+            "example": "3f6c2a8e-5b1d-4c7a-9e2f-8d4b6a1c0e57",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "eventId"
+        ]
+      },
+      "EndSessionResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "COMPLETED"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SessionListResponse": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SessionSummary": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "COMPLETED"
+            ]
+          },
+          "participantNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ParticipantSummary": {
+        "type": "object",
+        "properties": {
+          "participantId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "DISCONNECTED",
+              "LEFT"
+            ]
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SessionDetailResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "COMPLETED"
+            ]
+          },
+          "lastSequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantSummary"
+            }
+          }
+        }
+      },
+      "MessageSummary": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "senderParticipantId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "content": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SENT",
+              "EDITED",
+              "DELETED"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "RestoredFrom": {
+        "type": "object",
+        "properties": {
+          "snapshotSequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "사용한 Snapshot의 sequence. null이면 Snapshot 없이 처음부터 Replay"
+          },
+          "replayedEventCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Snapshot 이후 적용한 이벤트 수"
+          }
+        }
+      },
+      "TimelineResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "targetSequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sessionStatus": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "COMPLETED"
+            ]
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParticipantSummary"
+            }
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "restoredFrom": {
+            "$ref": "#/components/schemas/RestoredFrom"
+          }
+        }
+      },
+      "MessageListResponse": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "projectedSequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "비동기 반영이 끝난 마지막 sequence. 세션의 lastSequence보다 작으면 아직 반영 중"
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      },
+      "EventListResponse": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventResponse"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# 부하 테스트용 앱 설정 덮어쓰기
+# docker compose -f docker-compose.yml -f load-test/docker-compose.load.yml up -d --build app
+services:
+  app:
+    environment:
+      # 운영 기준 Snapshot 간격(1000)
+      SPRING_PROFILES_ACTIVE: local
+      # SQL 로그를 끈다: Lock을 잡은 채 콘솔에 쓰면 측정값이 출력 속도에 묶인다
+      LOGGING_LEVEL_ORG_HIBERNATE_SQL: INFO

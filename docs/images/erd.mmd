@@ -1,0 +1,63 @@
+%% docs/erd.md 1장 테이블 관계 그림의 원본.
+%% 실선 = FK, 점선 = FK 없는 논리 참조. 고친 뒤 https://mermaid.live 등에서 PNG로 내보내 erd.png를 교체한다.
+erDiagram
+    session ||--o{ participant : "참여 (FK)"
+    session ||--o{ event : "기록 (FK)"
+    participant |o--o{ event : "주체 (FK, nullable)"
+    event |o..o{ event : "수정/삭제 대상 (논리 참조)"
+    session ||..o{ message_projection : "논리 참조"
+    session ||..o| message_projection_checkpoint : "논리 참조"
+    session ||..o{ snapshot : "논리 참조"
+
+    session {
+        BIGINT id PK
+        VARCHAR status "IN_PROGRESS / SUSPENDED / COMPLETED"
+        BIGINT last_sequence "sequence 발급"
+        DATETIME created_at
+        DATETIME updated_at
+        DATETIME ended_at "nullable"
+    }
+    participant {
+        BIGINT id PK
+        BIGINT session_id FK
+        VARCHAR display_name
+        VARCHAR status "ACTIVE / DISCONNECTED / LEFT"
+        DATETIME joined_at
+        DATETIME left_at "nullable"
+        DATETIME updated_at
+    }
+    event {
+        BIGINT id PK
+        CHAR event_id UK "멱등성 키 (UUID)"
+        BIGINT session_id FK "UK (session_id, sequence)"
+        BIGINT sequence
+        VARCHAR event_type
+        BIGINT participant_id FK "nullable"
+        CHAR target_event_id "수정/삭제 대상 메시지"
+        JSON payload "클라이언트가 보낸 내용"
+        DATETIME occurred_at "클라이언트 시각"
+        DATETIME created_at "DB 시각 (Lock 안)"
+    }
+    message_projection {
+        BIGINT id PK
+        CHAR message_id UK "MESSAGE 이벤트의 event_id"
+        BIGINT session_id "UK (session_id, sequence)"
+        BIGINT sequence
+        BIGINT sender_participant_id
+        TEXT content "삭제 시 null"
+        VARCHAR status "SENT / EDITED / DELETED"
+        DATETIME sent_at
+        DATETIME updated_at
+    }
+    message_projection_checkpoint {
+        BIGINT session_id PK
+        BIGINT last_sequence "반영 위치"
+        DATETIME updated_at
+    }
+    snapshot {
+        BIGINT id PK
+        BIGINT session_id "UK (session_id, sequence)"
+        BIGINT sequence
+        JSON state "참여자 + 최근 N개 메시지"
+        DATETIME created_at
+    }

@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chat test client</title>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font: 13px/1.45 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+        color: #222;
+        background: #f4f4f2;
+    }
+    input, select, button { font: inherit; }
+    input, select { padding: 3px 5px; border: 1px solid #c8c8c2; border-radius: 3px; background: #fff; }
+    button { padding: 3px 9px; border: 1px solid #b9b9b2; border-radius: 3px; background: #f7f7f5; cursor: pointer; }
+    button:hover { background: #ecece8; }
+    button.link { border: 0; background: none; color: #1f5fbf; padding: 0 3px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #d6d6d1;
+        background: #fff;
+    }
+    header .title { font-weight: 600; margin-right: 6px; }
+    header .spacer { flex: 1; }
+    header .state { font-size: 12px; color: #555; }
+    #connState.on { color: #2e7d32; }
+    #connState.busy { color: #b5651d; }
+
+    main {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 210px minmax(0, 1fr) minmax(0, 1fr);
+    }
+    main > * { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid #d6d6d1; }
+    main > *:last-child { border-right: 0; }
+    h2 {
+        margin: 0;
+        padding: 8px 10px 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: #777;
+    }
+
+    aside { overflow: auto; padding-bottom: 12px; background: #fafaf8; }
+    aside .box { padding: 0 10px; }
+    aside ul { list-style: none; margin: 0; padding: 0 10px; }
+    aside li { padding: 2px 0; }
+    .st { font-size: 11px; margin-left: 4px; }
+    .st.ACTIVE { color: #2e7d32; }
+    .st.DISCONNECTED { color: #b5651d; }
+    .st.LEFT { color: #999; }
+    .tools { display: flex; flex-direction: column; gap: 6px; padding: 0 10px; }
+    .tools .row { display: flex; gap: 4px; }
+    .tools .row input { width: 4.5em; }
+    .tools .row button { flex: 1; }
+
+    #chat { flex: 1; overflow: auto; padding: 4px 10px; background: #fff; }
+    .msg { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; }
+    .msg .who { font-weight: 600; white-space: nowrap; }
+    .msg.mine .who { color: #1f5fbf; }
+    .msg .content { overflow-wrap: anywhere; }
+    .msg.deleted .content { color: #999; font-style: italic; }
+    .msg .tag { font-size: 11px; color: #888; white-space: nowrap; }
+    .msg .actions { margin-left: auto; visibility: hidden; white-space: nowrap; }
+    .msg:hover .actions { visibility: visible; }
+    .sys { padding: 2px 0; font-size: 12px; color: #888; }
+    .seq { display: inline-block; min-width: 2.6em; font-size: 11px; color: #999; }
+    #sendForm { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid #d6d6d1; }
+    #messageInput { flex: 1; min-width: 0; }
+
+    .logPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #log { flex: 1; overflow: auto; padding: 0 10px; background: #fff; font-size: 12px; line-height: 1.55; }
+    .log-row { display: grid; grid-template-columns: 1.1em 16em minmax(0, 1fr); gap: 6px; border-bottom: 1px solid #f0f0ec; }
+    .log-row .detail { color: #666; overflow-wrap: anywhere; }
+    .log-row.replay { background: #fbf4e2; }
+    .log-row.ignored, .log-row.ignored .detail { color: #aaa; }
+    .log-row.warn, .log-row.warn .detail { color: #b5651d; }
+    .log-row.error, .log-row.error .detail { color: #b3261e; }
+    .log-row.divider { border-bottom: 1px solid #999; font-weight: 600; }
+
+    .timelinePanel { max-height: 42%; display: flex; flex-direction: column; border-top: 1px solid #d6d6d1; }
+    #timelineForm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 10px 6px; }
+    #timelineSummary { padding: 0 10px 4px; font-size: 12px; color: #555; }
+    #timelineResult { flex: 1; overflow: auto; margin: 0; padding: 6px 10px; font-size: 11px; background: #fafaf8; }
+
+    @media (max-width: 900px) {
+        body { height: auto; }
+        main { grid-template-columns: 1fr; }
+        main > * { border-right: 0; border-bottom: 1px solid #d6d6d1; }
+        #chat, #log { height: 320px; flex: none; }
+    }
+</style>
+</head>
+<body>
+<header>
+    <span class="title">chat test client</span>
+    <button id="createBtn">세션 생성</button>
+    <label>세션 <input id="sessionInput" size="4"></label>
+    <label>이름 <input id="nameInput" size="7" value="철수"></label>
+    <button id="joinBtn">JOIN</button>
+    <label>참여자 <input id="participantInput" size="4"></label>
+    <button id="connectBtn">연결</button>
+    <button id="disconnectBtn">끊기</button>
+    <span class="spacer"></span>
+    <span id="connState" class="state mono">연결 안 됨</span>
+    <span class="state mono">lastApplied <b id="lastApplied">0</b></span>
+</header>
+
+<main>
+    <aside>
+        <h2>세션</h2>
+        <div id="sessionInfo" class="box mono">-</div>
+        <h2>참여자</h2>
+        <ul id="participants"></ul>
+        <h2>테스트</h2>
+        <div class="tools">
+            <button id="resendBtn" title="같은 eventId로 다시 보냄">마지막 요청 재전송</button>
+            <div class="row">
+                <input id="replayFromInput" class="mono" placeholder="seq">
+                <button id="replayBtn" title="클라이언트 상태는 그대로 두고 서버에만 이 번호를 보냄">이 번호로 재연결</button>
+            </div>
+            <button id="leaveBtn">LEAVE</button>
+            <button id="endBtn">세션 종료</button>
+        </div>
+    </aside>
+
+    <section>
+        <h2>채팅</h2>
+        <div id="chat"></div>
+        <form id="sendForm">
+            <input id="messageInput" autocomplete="off" placeholder="메시지">
+            <select id="modeSelect" title="전송 경로">
+                <option value="ws">WS</option>
+                <option value="rest">REST</option>
+            </select>
+            <button>전송</button>
+        </form>
+    </section>
+
+    <section>
+        <div class="logPanel">
+            <h2>프로토콜 로그 <button id="clearLogBtn" class="link">지우기</button></h2>
+            <div id="log" class="mono"></div>
+        </div>
+        <div class="timelinePanel">
+            <h2>timeline</h2>
+            <form id="timelineForm">
+                <input id="timelineSeqInput" class="mono" size="5" placeholder="seq">
+                <span>또는</span>
+                <input id="timelineAtInput" class="mono" size="24" placeholder="2026-10-04T21:00:00+09:00">
+                <button>복원</button>
+            </form>
+            <div id="timelineSummary"></div>
+            <pre id="timelineResult" class="mono"></pre>
+        </div>
+    </section>
+</main>
+
+<script>
+    const $ = id => document.getElementById(id);
+
+    const CLOSE_TEXT = {
+        1000: '정상 종료',
+        1006: '비정상 종료 (서버 다운, 네트워크)',
+        1009: '메시지가 너무 큼',
+        1011: '서버 오류',
+        1013: '재전송 중 이벤트가 너무 많이 쌓임 (다시 연결하면 이어서 받음)',
+        4000: '같은 참여자의 새 연결로 대체됨 (자동 재연결 안 함)',
+        4400: '잘못된 요청',
+        4404: '세션/참여자 없음',
+        4409: '이미 나갔거나 종료된 세션'
+    };
+
+    const state = {
+        sessionId: null,
+        participantId: null,
+        ws: null,
+        replaying: false,
+        lastApplied: 0,
+        pending: new Map(),   // 빈틈 때문에 아직 적용 못 한 이벤트 (sequence → event)
+        filling: false,
+        names: new Map(),     // participantId → 이름 (JOIN 이벤트에서)
+        items: [],            // 채팅 화면에 그릴 메시지/시스템 줄 (sequence 순)
+        messages: new Map(),  // messageId → item
+        lastRequest: null,
+        refreshTimer: null
+    };
+
+    // ===== 공통 =====
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
+    }
+
+    function shortId(id) {
+        return id ? id.slice(0, 8) : '';
+    }
+
+    function nameOf(participantId) {
+        return state.names.get(participantId) ?? '#' + participantId;
+    }
+
+    function log(dir, title, detail = '', className = '') {
+        const row = el('div', 'log-row ' + className);
+        row.append(el('span', null, dir), el('span', null, title), el('span', 'detail', detail));
+        const box = $('log');
+        box.append(row);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    async function api(method, path, body, quiet = false) {
+        const response = await fetch(path, {
+            method,
+            headers: body ? { 'Content-Type': 'application/json' } : {},
+            body: body ? JSON.stringify(body) : undefined
+        });
+        const data = await response.json().catch(() => null);
+        if (!quiet || !response.ok) {
+            const detail = response.ok ? '' : `${data?.code ?? ''} ${data?.detail ?? ''}`;
+            log('⇄', `${method} ${path.split('?')[0]}`, `${response.status} ${detail}`, response.ok ? '' : 'error');
+        }
+        if (!response.ok) throw new Error(data?.detail ?? String(response.status));
+        return { status: response.status, data };
+    }
+
+    // ===== 신원 / 저장 =====
+
+    function storageKey() {
+        return `lastApplied:${state.sessionId}:${state.participantId}`;
+    }
+
+    function loadLastApplied() {
+        try {
+            return Number(localStorage.getItem(storageKey()) ?? 0);
+        } catch {
+            return 0;
+        }
+    }
+
+    function saveLastApplied() {
+        $('lastApplied').textContent = state.lastApplied;
+        try {
+            localStorage.setItem(storageKey(), state.lastApplied);
+        } catch {
+            // 저장 못 해도 화면 동작에는 문제없음
+        }
+    }
+
+    // 다른 참여자로 바꾸면 화면 상태를 비우고, 저장된 lastApplied까지는 REST로 다시 그린다
+    async function useIdentity(sessionId, participantId) {
+        if (state.sessionId === sessionId && state.participantId === participantId) return;
+        if (state.ws) state.ws.close();
+
+        Object.assign(state, {
+            sessionId,
+            participantId,
+            ws: null,
+            lastApplied: 0,
+            pending: new Map(),
+            names: new Map(),
+            items: [],
+            messages: new Map(),
+            lastRequest: null
+        });
+        $('sessionInput').value = sessionId;
+        $('participantInput').value = participantId;
+        history.replaceState(null, '', `?session=${sessionId}&participant=${participantId}`);
+
+        const saved = loadLastApplied();
+        if (saved > 0) await restoreUntil(saved);
+        saveLastApplied();
+        renderChat();
+        refreshSession();
+    }
+
+    async function restoreUntil(target) {
+        while (state.lastApplied < target) {
+            const query = `fromSequence=${state.lastApplied}&toSequence=${target}&limit=500`;
+            const { data } = await api('GET', `/sessions/${state.sessionId}/events?${query}`, null, true);
+            if (data.events.length === 0) break;
+            data.events.forEach(receive);
+        }
+        log('i', `기록 복원 1~${state.lastApplied}`, '새로고침 전에 적용한 이벤트를 REST로 다시 그림');
+    }
+
+    // ===== 이벤트 적용 (sequence 순서 보장) =====
+
+    /**
+     * 이미 적용한 번호면 무시, 다음 번호면 적용, 건너뛴 번호가 있으면 보관해두고 빈틈을 REST로 채운다.
+     */
+    function receive(event) {
+        if (event.sequence <= state.lastApplied) return 'ignored';
+
+        state.pending.set(event.sequence, event);
+        let applied = false;
+        while (state.pending.has(state.lastApplied + 1)) {
+            const next = state.pending.get(state.lastApplied + 1);
+            state.pending.delete(next.sequence);
+            applyEvent(next);
+            state.lastApplied = next.sequence;
+            applied = true;
+        }
+        if (applied) {
+            saveLastApplied();
+            renderChat();
+            scheduleRefresh();
+        }
+        if (state.pending.size > 0) {
+            setTimeout(fillGap);
+            return 'pending';
+        }
+        return 'applied';
+    }
+
+    async function fillGap() {
+        if (state.filling) return;
+        state.filling = true;
+        try {
+            while (state.pending.size > 0) {
+                const to = Math.min(...state.pending.keys()) - 1;
+                log('!', `빈틈 ${state.lastApplied + 1}~${to}`, 'REST GET /events로 채움', 'warn');
+                const query = `fromSequence=${state.lastApplied}&toSequence=${to}&limit=500`;
+                const { data } = await api('GET', `/sessions/${state.sessionId}/events?${query}`, null, true);
+                if (data.events.length === 0) break;
+                data.events.forEach(receive);
+            }
+        } catch {
+            // 실패하면 다음 이벤트가 올 때 다시 시도
+        } finally {
+            state.filling = false;
+        }
+    }
+
+    function applyEvent(event) {
+        const who = nameOf(event.participantId);
+        switch (event.type) {
+            case 'SESSION_CREATED':
+                addSystem(event, '세션 생성');
+                break;
+            case 'JOIN':
+                state.names.set(event.participantId, event.payload?.displayName ?? who);
+                addSystem(event, `${nameOf(event.participantId)} 입장`);
+                break;
+            case 'MESSAGE': {
+                const item = {
+                    kind: 'msg',
+                    sequence: event.sequence,
+                    id: event.eventId,
+                    sender: event.participantId,
+                    content: event.payload?.content,
+                    status: 'SENT'
+                };
+                state.items.push(item);
+                state.messages.set(item.id, item);
+                break;
+            }
+            case 'MESSAGE_EDITED':
+            case 'MESSAGE_DELETED': {
+                const target = state.messages.get(event.targetEventId);
+                if (!target) break;
+                target.status = event.type === 'MESSAGE_EDITED' ? 'EDITED' : 'DELETED';
+                target.content = event.type === 'MESSAGE_EDITED' ? event.payload?.content : null;
+                target.changedAt = event.sequence;
+                break;
+            }
+            case 'LEAVE':
+                addSystem(event, `${who} 퇴장`);
+                break;
+            case 'DISCONNECT':
+                addSystem(event, `${who} 연결 끊김`);
+                break;
+            case 'RECONNECT':
+                addSystem(event, `${who} 다시 연결`);
+                break;
+            case 'SESSION_ENDED':
+                addSystem(event, '세션 종료');
+                break;
+        }
+    }
+
+    function addSystem(event, text) {
+        state.items.push({ kind: 'sys', sequence: event.sequence, text });
+    }
+
+    // ===== 화면 =====
+
+    function renderChat() {
+        const box = $('chat');
+        box.replaceChildren(...state.items.map(renderItem));
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function renderItem(item) {
+        if (item.kind === 'sys') {
+            const row = el('div', 'sys');
+            row.append(el('span', 'seq mono', '#' + item.sequence), item.text);
+            return row;
+        }
+
+        const mine = item.sender === state.participantId;
+        const row = el('div', 'msg' + (mine ? ' mine' : '') + (item.status === 'DELETED' ? ' deleted' : ''));
+        row.append(
+            el('span', 'seq mono', '#' + item.sequence),
+            el('span', 'who', nameOf(item.sender)),
+            el('span', 'content', item.status === 'DELETED' ? '삭제된 메시지' : item.content)
+        );
+        if (item.status !== 'SENT') {
+            row.append(el('span', 'tag mono', `${item.status === 'EDITED' ? '수정됨' : '삭제'} #${item.changedAt}`));
+        }
+        if (mine && item.status !== 'DELETED') {
+            const actions = el('span', 'actions');
+            const edit = el('button', 'link', '수정');
+            edit.onclick = () => editMessage(item);
+            const remove = el('button', 'link', '삭제');
+            remove.onclick = () => sendEvent('MESSAGE_DELETED', item.id, {});
+            actions.append(edit, remove);
+            row.append(actions);
+        }
+        return row;
+    }
+
+    function setConnState(text, className = '') {
+        $('connState').textContent = text;
+        $('connState').className = 'state mono ' + className;
+    }
+
+    // 참여자/세션 상태는 서버의 현재 값(동기 Projection)을 그대로 보여준다
+    function scheduleRefresh() {
+        clearTimeout(state.refreshTimer);
+        state.refreshTimer = setTimeout(refreshSession, 150);
+    }
+
+    async function refreshSession() {
+        if (!state.sessionId) return;
+        try {
+            const { data } = await api('GET', `/sessions/${state.sessionId}`, null, true);
+            $('sessionInfo').textContent = `#${data.sessionId} ${data.status} (last ${data.lastSequence})`;
+            $('participants').replaceChildren(...data.participants.map(p => {
+                const li = el('li', null, `${p.displayName} #${p.participantId}`);
+                if (p.participantId === state.participantId) {
+                    li.append(' (나)');
+                    $('nameInput').value = p.displayName;
+                }
+                li.append(el('span', 'st mono ' + p.status, p.status));
+                return li;
+            }));
+        } catch {
+            // 로그에 이미 남음
+        }
+    }
+
+    // ===== WebSocket =====
+
+    function connect(fromSequence = state.lastApplied) {
+        if (!state.sessionId || !state.participantId) {
+            log('!', '연결 불가', '세션과 참여자를 먼저 정하세요', 'error');
+            return;
+        }
+        const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${scheme}://${location.host}/ws/sessions/${state.sessionId}`
+            + `?participantId=${state.participantId}&lastAppliedSequence=${fromSequence}`;
+        const ws = new WebSocket(url);
+        state.ws = ws;
+        state.replaying = true;
+        setConnState('연결 중', 'busy');
+        log('→', '연결', `lastAppliedSequence=${fromSequence}`);
+
+        ws.onmessage = message => onMessage(JSON.parse(message.data));
+        ws.onclose = closeEvent => {
+            const text = CLOSE_TEXT[closeEvent.code] ?? closeEvent.reason;
+            log('×', `close ${closeEvent.code}`, text, closeEvent.code === 1000 ? '' : 'warn');
+            // 새 연결로 바꾼 뒤 옛 연결이 늦게 닫힌 경우는 상태를 건드리지 않는다
+            if (ws !== state.ws) return;
+            state.ws = null;
+            setConnState(`끊김 ${closeEvent.code}`);
+        };
+    }
+
+    function onMessage(message) {
+        switch (message.type) {
+            case 'CONNECTED':
+                setConnState('재전송 중', 'busy');
+                log('←', 'CONNECTED', `replayFrom=${message.replayFromSequence}`);
+                break;
+            case 'EVENT': {
+                const event = message.event;
+                const result = receive(event);
+                const detail = {
+                    applied: `적용 → lastApplied ${state.lastApplied}`,
+                    ignored: `이미 적용함 → 무시`,
+                    pending: `빈틈 있음 → 보관`
+                }[result];
+                const className = (state.replaying ? 'replay ' : '') + (result === 'ignored' ? 'ignored' : '');
+                log('←', `EVENT #${event.sequence} ${event.type}`, detail, className);
+                break;
+            }
+            case 'REPLAY_COMPLETE':
+                state.replaying = false;
+                setConnState('연결됨', 'on');
+                log('←', `REPLAY_COMPLETE ${message.lastSequence}`, '여기부터 실시간', 'divider');
+                break;
+            case 'ACK':
+                log(
+                    '←',
+                    `ACK #${message.sequence}`,
+                    `${shortId(message.eventId)} duplicate=${message.duplicate}`,
+                    message.duplicate ? 'warn' : ''
+                );
+                break;
+            case 'ERROR':
+                log('←', `ERROR ${message.code}`, message.message, 'error');
+                break;
+        }
+    }
+
+    // ===== 요청 =====
+
+    async function sendEvent(type, targetEventId, payload, eventId = crypto.randomUUID()) {
+        state.lastRequest = { type, targetEventId, payload, eventId };
+
+        if ($('modeSelect').value === 'ws') {
+            if (state.ws?.readyState !== WebSocket.OPEN) {
+                log('!', '전송 불가', 'WS로 보내려면 먼저 연결', 'error');
+                return;
+            }
+            state.ws.send(JSON.stringify({ type: 'SEND_EVENT', eventId, eventType: type, targetEventId, payload }));
+            log('→', `SEND_EVENT ${type}`, shortId(eventId));
+            return;
+        }
+
+        try {
+            const { data } = await api('POST', `/sessions/${state.sessionId}/events`, {
+                eventId,
+                participantId: state.participantId,
+                type,
+                targetEventId,
+                payload
+            });
+            // REST 응답도 같은 규칙으로 적용한다. 같은 이벤트가 WS로도 오면 한쪽은 무시된다
+            receive(data);
+        } catch {
+            // 로그에 이미 남음
+        }
+    }
+
+    function editMessage(item) {
+        const content = prompt('수정할 내용', item.content);
+        if (content) sendEvent('MESSAGE_EDITED', item.id, { content });
+    }
+
+    $('createBtn').onclick = async () => {
+        try {
+            const { data } = await api('POST', '/sessions', { eventId: crypto.randomUUID() });
+            $('sessionInput').value = data.sessionId;
+            $('participantInput').value = '';
+        } catch {
+            // 로그에 이미 남음
+        }
+    };
+
+    $('joinBtn').onclick = async () => {
+        const sessionId = Number($('sessionInput').value);
+        try {
+            const { data } = await api('POST', `/sessions/${sessionId}/join`, {
+                eventId: crypto.randomUUID(),
+                displayName: $('nameInput').value
+            });
+            await useIdentity(sessionId, data.participantId);
+            connect();
+        } catch {
+            // 로그에 이미 남음
+        }
+    };
+
+    $('connectBtn').onclick = async () => {
+        await useIdentity(Number($('sessionInput').value), Number($('participantInput').value));
+        connect();
+    };
+
+    $('disconnectBtn').onclick = () => state.ws?.close();
+
+    $('sendForm').onsubmit = submitEvent => {
+        submitEvent.preventDefault();
+        const content = $('messageInput').value.trim();
+        if (!content) return;
+        sendEvent('MESSAGE', null, { content });
+        $('messageInput').value = '';
+    };
+
+    $('resendBtn').onclick = () => {
+        const last = state.lastRequest;
+        if (!last) {
+            log('!', '재전송 불가', '아직 보낸 요청이 없음', 'warn');
+            return;
+        }
+        sendEvent(last.type, last.targetEventId, last.payload, last.eventId);
+    };
+
+    $('replayBtn').onclick = () => {
+        const from = Number($('replayFromInput').value);
+        if (!Number.isInteger(from) || from < 0) return;
+        connect(from);
+    };
+
+    $('leaveBtn').onclick = () => sendEvent('LEAVE', null, {});
+
+    $('endBtn').onclick = async () => {
+        try {
+            await api('POST', `/sessions/${state.sessionId}/end`, { eventId: crypto.randomUUID() });
+        } catch {
+            // 로그에 이미 남음
+        }
+    };
+
+    $('clearLogBtn').onclick = () => $('log').replaceChildren();
+
+    $('timelineForm').onsubmit = async submitEvent => {
+        submitEvent.preventDefault();
+        const sequence = $('timelineSeqInput').value.trim();
+        const at = $('timelineAtInput').value.trim();
+        const query = sequence ? `sequence=${sequence}` : `at=${encodeURIComponent(at)}`;
+        try {
+            const { data } = await api('GET', `/sessions/${state.sessionId}/timeline?${query}`);
+            const from = data.restoredFrom;
+            $('timelineSummary').textContent = `#${data.targetSequence} ${data.sessionStatus} · `
+                + `snapshot ${from.snapshotSequence ?? '없음'} + replay ${from.replayedEventCount}개`;
+            $('timelineResult').textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+            $('timelineSummary').textContent = error.message;
+            $('timelineResult').textContent = '';
+        }
+    };
+
+    // 새로고침해도 같은 참여자로 이어서 연결한다
+    (async () => {
+        const params = new URLSearchParams(location.search);
+        const sessionId = Number(params.get('session'));
+        const participantId = Number(params.get('participant'));
+        if (sessionId) $('sessionInput').value = sessionId;
+        if (!sessionId || !participantId) return;
+        await useIdentity(sessionId, participantId);
+        connect();
+    })();
+</script>
+</body>
+</html>
